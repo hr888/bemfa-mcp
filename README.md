@@ -12,4 +12,15 @@ device_management({"action": "resetwifi"})  # 重置WiFi
 device_management({"action": "reconfig"})   # 重新配网
 
 # 4. 获取设备信息
+
 get_device_info({})
+
+# 巴法云MQTT控制MCP服务
+
+## 安全说明
+⚠️ **重要安全提示**: 此MCP服务不再包含任何硬编码的个人信息，每个用户需要配置自己的巴法云参数。
+
+## 使用步骤
+
+### 1. 配置连接参数
+首先调用 `configure_bemfa` 工具配置你的巴法云参数：
