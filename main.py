@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional
 import paho.mqtt.client as mqtt
 from mcp.server import Server
@@ -18,12 +19,12 @@ class BemfaMCP:
         self.connected = False
         self.devices = {}  # 存储设备状态
         
-        # 根据你的ESP8266代码配置
+        # 从环境变量或配置文件读取配置（不再硬编码）
         self.bemfa_config = {
-            "server": "bemfa.com",
-            "port": 9501,
-            "client_id": "1027eaa277d6457fa609c8286749e828",  # 你的巴法云UID
-            "topic": "MasterLight002"  # 你的主题名
+            "server": os.getenv("BEMFA_SERVER", "bemfa.com"),
+            "port": int(os.getenv("BEMFA_PORT", "9501")),
+            "client_id": os.getenv("BEMFA_CLIENT_ID", ""),  # 必须由用户配置
+            "topic": os.getenv("BEMFA_TOPIC", "light001")   # 默认主题
         }
         
         self.setup_handlers()
@@ -34,20 +35,37 @@ class BemfaMCP:
             """返回可用的工具列表"""
             return [
                 Tool(
-                    name="connect_bemfa",
-                    description="连接到巴法云MQTT服务器",
+                    name="configure_bemfa",
+                    description="配置巴法云连接参数（首次使用必须调用）",
                     inputSchema={
                         "type": "object",
                         "properties": {
                             "client_id": {
                                 "type": "string",
-                                "description": "巴法云客户端ID，默认为1027eaa277d6457fa609c8286749e828"
+                                "description": "巴法云客户端ID（必填）"
                             },
                             "topic": {
                                 "type": "string", 
-                                "description": "MQTT主题，默认为MasterLight002"
+                                "description": "MQTT主题，默认为light001"
+                            },
+                            "server": {
+                                "type": "string",
+                                "description": "MQTT服务器，默认为bemfa.com"
+                            },
+                            "port": {
+                                "type": "integer",
+                                "description": "MQTT端口，默认为9501"
                             }
-                        }
+                        },
+                        "required": ["client_id"]
+                    }
+                ),
+                Tool(
+                    name="connect_bemfa",
+                    description="连接到巴法云MQTT服务器",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {}
                     }
                 ),
                 Tool(
@@ -67,7 +85,7 @@ class BemfaMCP:
                 ),
                 Tool(
                     name="device_management",
-                    description="设备管理功能",
+                    description="设备管理功能（谨慎使用）",
                     inputSchema={
                         "type": "object",
                         "properties": {
@@ -81,8 +99,8 @@ class BemfaMCP:
                     }
                 ),
                 Tool(
-                    name="get_device_info",
-                    description="获取设备信息",
+                    name="get_connection_status",
+                    description="获取当前连接状态和配置信息",
                     inputSchema={
                         "type": "object",
                         "properties": {}
@@ -94,19 +112,53 @@ class BemfaMCP:
         async def handle_call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             """处理工具调用"""
             try:
-                if name == "connect_bemfa":
+                if name == "configure_bemfa":
+                    return await self._configure_bemfa(arguments)
+                elif name == "connect_bemfa":
                     return await self._connect_bemfa(arguments)
                 elif name == "control_light":
                     return await self._control_light(arguments)
                 elif name == "device_management":
                     return await self._device_management(arguments)
-                elif name == "get_device_info":
-                    return await self._get_device_info(arguments)
+                elif name == "get_connection_status":
+                    return await self._get_connection_status(arguments)
                 else:
                     raise ValueError(f"未知工具: {name}")
             except Exception as e:
                 logger.error(f"工具调用错误: {e}")
                 return [TextContent(type="text", text=f"错误: {str(e)}")]
+    
+    async def _configure_bemfa(self, arguments: Dict[str, Any]) -> List[TextContent]:
+        """配置巴法云连接参数"""
+        client_id = arguments.get("client_id")
+        topic = arguments.get("topic", "light001")
+        server = arguments.get("server", "bemfa.com")
+        port = arguments.get("port", 9501)
+        
+        if not client_id:
+            return [TextContent(type="text", text="错误: client_id 是必填参数")]
+        
+        # 更新配置
+        self.bemfa_config.update({
+            "client_id": client_id,
+            "topic": topic,
+            "server": server,
+            "port": port
+        })
+        
+        # 隐藏敏感信息的显示（只显示部分字符）
+        masked_client_id = client_id[:8] + "***" + client_id[-8:] if len(client_id) > 16 else "***"
+        
+        config_info = f"""
+巴法云配置已更新:
+- 服务器: {server}:{port}
+- 主题: {topic}
+- 客户端ID: {masked_client_id}
+
+请调用 connect_bemfa 工具进行连接。
+        """
+        
+        return [TextContent(type="text", text=config_info)]
     
     def _on_mqtt_connect(self, client, userdata, flags, rc):
         """MQTT连接回调"""
@@ -146,18 +198,14 @@ class BemfaMCP:
     
     async def _connect_bemfa(self, arguments: Dict[str, Any]) -> List[TextContent]:
         """连接到巴法云MQTT服务器"""
+        if not self.bemfa_config["client_id"]:
+            return [TextContent(type="text", text="错误: 请先调用 configure_bemfa 工具配置连接参数")]
+        
         if self.mqtt_client and self.connected:
             return [TextContent(type="text", text="已经连接到巴法云MQTT服务器")]
         
-        # 使用参数或默认配置
-        client_id = arguments.get("client_id", self.bemfa_config["client_id"])
-        topic = arguments.get("topic", self.bemfa_config["topic"])
-        
-        self.bemfa_config["client_id"] = client_id
-        self.bemfa_config["topic"] = topic
-        
         # 创建MQTT客户端
-        self.mqtt_client = mqtt.Client(client_id=client_id)
+        self.mqtt_client = mqtt.Client(client_id=self.bemfa_config["client_id"])
         self.mqtt_client.on_connect = self._on_mqtt_connect
         self.mqtt_client.on_message = self._on_mqtt_message
         
@@ -180,7 +228,18 @@ class BemfaMCP:
                 await asyncio.sleep(0.5)
             
             if self.connected:
-                return [TextContent(type="text", text=f"成功连接到巴法云MQTT服务器，主题: {topic}")]
+                # 隐藏敏感信息显示
+                masked_client_id = self.bemfa_config["client_id"][:8] + "***" + self.bemfa_config["client_id"][-8:] if len(self.bemfa_config["client_id"]) > 16 else "***"
+                
+                success_msg = f"""
+成功连接到巴法云MQTT服务器!
+- 服务器: {self.bemfa_config['server']}:{self.bemfa_config['port']}
+- 主题: {self.bemfa_config['topic']}
+- 客户端ID: {masked_client_id}
+
+现在可以使用 control_light 工具控制设备了。
+                """
+                return [TextContent(type="text", text=success_msg)]
             else:
                 return [TextContent(type="text", text="连接巴法云MQTT服务器超时")]
                 
@@ -189,7 +248,7 @@ class BemfaMCP:
             return [TextContent(type="text", text=f"连接失败: {str(e)}")]
     
     async def _control_light(self, arguments: Dict[str, Any]) -> List[TextContent]:
-        """控制灯光 - 完全匹配ESP8266代码"""
+        """控制灯光"""
         if not self.connected:
             return [TextContent(type="text", text="错误: 请先连接到巴法云MQTT服务器")]
         
@@ -235,7 +294,7 @@ class BemfaMCP:
         return [TextContent(type="text", text=result_text)]
     
     async def _device_management(self, arguments: Dict[str, Any]) -> List[TextContent]:
-        """设备管理功能 - 匹配ESP8266的resetwifi和reconfig功能"""
+        """设备管理功能"""
         if not self.connected:
             return [TextContent(type="text", text="错误: 请先连接到巴法云MQTT服务器")]
         
@@ -256,54 +315,50 @@ class BemfaMCP:
             self.mqtt_client.publish(self.bemfa_config["topic"], message)
             logger.info(f"发布设备管理命令: {self.bemfa_config['topic']} -> {message}")
             
-            action_descriptions = {
-                "resetwifi": "重置WiFi配置，设备将恢复出厂设置并等待重新配网",
-                "reconfig": "重新启动配网模式，设备将进入SmartConfig等待状态"
-            }
+            warning_msg = """
+⚠️ 警告：设备管理命令已发送！
+
+resetwifi: 设备将重置WiFi配置并恢复出厂设置
+reconfig: 设备将重新进入配网模式
+
+这些操作会影响设备连接，请谨慎使用！
+            """
             
-            return [TextContent(type="text", text=f"已发送设备管理命令: {message}\n{action_descriptions[action]}")]
+            return [TextContent(type="text", text=warning_msg)]
             
         except Exception as e:
             return [TextContent(type="text", text=f"发送设备管理命令失败: {str(e)}")]
     
-    async def _get_device_info(self, arguments: Dict[str, Any]) -> List[TextContent]:
-        """获取设备信息"""
-        device_id = self.bemfa_config["topic"]
+    async def _get_connection_status(self, arguments: Dict[str, Any]) -> List[TextContent]:
+        """获取连接状态"""
+        # 隐藏敏感信息
+        masked_client_id = "未配置"
+        if self.bemfa_config["client_id"]:
+            if len(self.bemfa_config["client_id"]) > 16:
+                masked_client_id = self.bemfa_config["client_id"][:8] + "***" + self.bemfa_config["client_id"][-8:]
+            else:
+                masked_client_id = "***"
         
         info_lines = [
-            "设备信息:",
-            f"主题: {device_id}",
+            "连接状态:",
             f"MQTT服务器: {self.bemfa_config['server']}:{self.bemfa_config['port']}",
-            f"连接状态: {'已连接' if self.connected else '未连接'}"
+            f"主题: {self.bemfa_config['topic']}",
+            f"客户端ID: {masked_client_id}",
+            f"连接状态: {'✅ 已连接' if self.connected else '❌ 未连接'}"
         ]
         
+        device_id = self.bemfa_config["topic"]
         if device_id in self.devices:
             status_info = self.devices[device_id]
             info_lines.append(f"设备状态: {status_info['status']}")
-            info_lines.append(f"最后更新: {status_info['last_update']}")
-        else:
-            info_lines.append("设备状态: 未知")
         
-        # 发送状态查询以获取最新状态
-        if self.connected:
-            try:
-                self.mqtt_client.publish(device_id, "status")
-                info_lines.append("\n已发送状态查询请求...")
-            except Exception as e:
-                info_lines.append(f"\n状态查询失败: {str(e)}")
+        if not self.bemfa_config["client_id"]:
+            info_lines.append("\n⚠️ 提示: 请先调用 configure_bemfa 工具配置连接参数")
         
         return [TextContent(type="text", text="\n".join(info_lines))]
     
     async def run(self):
         """运行MCP服务器"""
-        # 自动连接（使用默认配置）
-        logger.info("正在自动连接到巴法云MQTT服务器...")
-        auto_connect_result = await self._connect_bemfa({})
-        if "成功" in auto_connect_result[0].text:
-            logger.info("自动连接成功")
-        else:
-            logger.warning("自动连接失败，需要手动连接")
-        
         async with self.server.run_stdio() as (read_stream, write_stream):
             await asyncio.gather(
                 read_stream,
