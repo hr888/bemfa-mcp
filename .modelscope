@@ -1,0 +1,21 @@
+app:
+  name: bemfa-mcp
+  type: custom
+  runtime: python3.11
+  command: python main.py
+  port: 8080
+
+build:
+  dockerfile: Dockerfile
+
+resources:
+  cpu: 1
+  memory: 2Gi
+
+health_check:
+  path: /health
+  initial_delay_seconds: 10
+  period_seconds: 30
+  timeout_seconds: 5
+  success_threshold: 1
+  failure_threshold: 3
