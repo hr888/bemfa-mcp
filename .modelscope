@@ -1,21 +1,15 @@
 app:
   name: bemfa-mcp
-  type: custom
-  runtime: python3.11
-  command: python main.py
-  port: 8080
+  type: model
+  framework: pytorch
+  task: text-generation
+  
+environment:
+  python: 3.8
+  requirements:
+    - modelscope>=1.0.0
+    - mcp>=1.0.0
+    - paho-mqtt>=1.6.0
 
-build:
-  dockerfile: Dockerfile
-
-resources:
-  cpu: 1
-  memory: 2Gi
-
-health_check:
-  path: /health
-  initial_delay_seconds: 10
-  period_seconds: 30
-  timeout_seconds: 5
-  success_threshold: 1
-  failure_threshold: 3
+deploy:
+  command: python -c "from pipeline import bemfa_mcp_pipeline; bemfa_mcp_pipeline('.')"
