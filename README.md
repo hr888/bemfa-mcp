@@ -54,25 +54,4 @@ json
 2. 注册账号并登录控制台
 3. 创建MQTT设备，获取客户端ID和主题
 4. 在魔搭平台配置环境变量
-6. 魔搭平台部署步骤
-步骤1：创建MCP服务器
-登录魔搭平台
-进入MCP服务器创建页面
-选择"自定义服务器"
-步骤2：配置服务
-在服务配置区域粘贴上面的JSON配置。
-步骤3：设置环境变量
-在环境变量配置区域设置以下变量：
-BEMFA_SERVER=bemfa.com
-BEMFA_PORT=9501
-DEFAULT_CLIENT_ID=您的巴法云客户端ID
-DEFAULT_TOPIC=您的MQTT主题
-SERVER_PORT=4000
-NODE_ENV=production
-步骤4：上传文件
-将以下文件打包为ZIP上传：
-bemfa_mcp.py
-requirements.txt
-README.md（可选）
-步骤5：启动服务
-完成配置后启动服务器。
+
